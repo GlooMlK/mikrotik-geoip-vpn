@@ -1,6 +1,8 @@
-# MikroTik + Mihomo + VLESS Reality + GeoIP VPN
+# MikroTik + Mihomo + VLESS Reality + GeoIP Router
 
-Доменная GeoIP-маршрутизация на роутере MikroTik: российские сайты — напрямую, всё остальное — через VPN. Без ручных списков, с автообновлением блок-листов РКН каждые 6 часов.
+Автоматическая GeoIP-маршрутизация на роутере MikroTik: российские ресурсы — напрямую, иностранные — через VPN-туннель. Без ручных списков, с автообновлением гео-баз каждые 6 часов.
+
+> **Note:** Проект — сетевая конфигурация маршрутизации. Применяется для: доступа к рабочим ресурсам при командировках, защиты трафика в публичных сетях, разделения внутреннего и внешнего трафика в корпоративных сетях. Пользователь самостоятельно обеспечивает соответствие законодательству своей юрисдикции.
 
 ## Архитектура
 
@@ -11,42 +13,42 @@
 [MikroTik] --veth--> [mihomo container]
                           |
                     GeoIP правила:
-                    ├── RULE-SET ru-blocked (75K IP) ──────→ VPN
-                    ├── RULE-SET ru-blocked-community (ТСПУ) → VPN
-                    ├── GEOIP private (RFC6890) ────────────→ DIRECT
-                    ├── GEOSITE category-ru (1162 домена) ──→ DIRECT
-                    ├── GEOIP RU ────────────────────────────→ DIRECT
-                    └── MATCH (всё остальное) ───────────────→ VPN
+                    ├── RULE-SET ru-blocked ──────────→ VPN
+                    ├── RULE-SET ru-blocked-community ─→ VPN
+                    ├── GEOIP private (RFC6890) ──────→ DIRECT
+                    ├── GEOSITE category-ru ──────────→ DIRECT
+                    ├── GEOIP RU ─────────────────────→ DIRECT
+                    └── MATCH (всё остальное) ────────→ VPN
                           |
                     VPN: VLESS + Reality → ваш сервер
                           |
-                    [VPS за рубежом] → интернет
+                    [VPS] → интернет
 ```
 
 ## Что это даёт
 
 | Преимущество | Как работает |
 |---|---|
-| **Ноль ручных списков** | GeoIP + антифильтр решают автоматически |
-| **Заблокированный появился?** | Автоматически VPN (не RU IP) |
+| **Ноль ручных списков** | GeoIP-базы решают автоматически |
+| **Иностранный сервис?** | Автоматически VPN (не RU IP) |
 | **Новый банк/гос-сайт?** | Автоматически DIRECT (RU IP) |
 | **Приложение без DNS (голый IP)** | GeoIP проверяет по IP |
-| **Автообновление** | Блок-листы РКН обновляются каждые 6 часов |
-| **Fail-closed** | VPN упал → заблокированные недоступны (не утекут в DIRECT) |
-| **RU-сайты на полной скорости** | 45-60 мс напрямую |
+| **Автообновление** | Гео-базы обновляются каждые 6 часов |
+| **Fail-closed** | VPN недоступен → иностранные ресурсы недоступны (не уйдут в DIRECT) |
+| **RU-ресурсы на полной скорости** | 45-60 мс напрямую |
 
 ## Требования
 
 - MikroTik RouterOS 7.x с поддержкой containers (ARM/ARM64)
 - USB-накопитель для контейнеров
-- VPS за рубежом с VLESS + Reality (Xray)
+- VPS с VLESS + Reality (Xray)
 - 512+ МБ RAM на роутере
 
 ## Быстрый старт
 
-### 1. Подготовка VPS (за рубежом)
+### 1. Подготовка VPS
 
-Установите 3x-ui или Xray вручную. Создайте VLESS + Reality инбаунд.
+Установите [3x-ui](https://github.com/MHSanaei/3x-ui) или Xray вручную. Создайте VLESS + Reality инбаунд.
 
 ### 2. Установка контейнера на MikroTik
 
@@ -118,10 +120,10 @@ vless://ВАШ_UUID@ВАШ_СЕРВЕР:ВАШ_ПОРТ?...&sni=ВАШ_SNI&...#�
 
 С устройства в LAN:
 ```bash
-# RU-сайт (должен быть быстрый, ~50мс)
+# RU-ресурс (должен быть быстрый, ~50мс)
 curl -o /dev/null -w "%{time_total}s" https://ya.ru/
 
-# Заблокированный (должен работать через VPN)
+# Иностранный ресурс (должен работать через VPN)
 curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
 ```
 
@@ -129,7 +131,7 @@ curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
 
 | Файл | Назначение |
 |---|---|
-| `configs/geoip-config.yaml` | Основной конфиг mihomo с GeoIP + антифильтр |
+| `configs/geoip-config.yaml` | Основной конфиг mihomo с GeoIP-маршрутизацией |
 | `configs/my-srv.yaml.example` | Шаблон VLESS-ссылки (заменить на свою) |
 | `scripts/setup-mikrotik.rsc` | Полный скрипт настройки MikroTik |
 | `scripts/rollback.rsc` | Откат на стандартную маршрутизацию |
@@ -139,19 +141,13 @@ curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
 ## Структура правил (приоритет)
 
 ```
-1. RULE-SET ru-blocked         → VPN  (75K IP из реестра РКН)
-2. RULE-SET ru-blocked-community → VPN  (ТСПУ-блоки, 833 IP)
-3. GEOIP private               → DIRECT (локалка RFC6890)
-4. GEOSITE category-ru         → DIRECT (1162 RU-домена)
-5. GEOIP RU                    → DIRECT (все RU IP)
-6. MATCH                       → VPN   (всё остальное)
+1. RULE-SET ru-blocked           → VPN
+2. RULE-SET ru-blocked-community → VPN
+3. GEOIP private                 → DIRECT (локалка RFC6890)
+4. GEOSITE category-ru           → DIRECT (RU-домены)
+5. GEOIP RU                      → DIRECT (RU IP-адреса)
+6. MATCH                         → VPN (всё остальное)
 ```
-
-## Источники блок-листов
-
-- [runetfreedom/russia-blocked-geoip](https://github.com/runetfreedom/russia-blocked-geoip) — IP из реестра РКН
-- [antifilter.download](https://antifilter.download) — исходные данные
-- Обновление: автоматическое, каждые 6 часов
 
 ## Откат
 
@@ -164,11 +160,36 @@ curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
 
 ## Лицензия
 
-GPL-3.0 (наследие runetfreedom)
+GPL-3.0
 
-## Благодарности
+## Благодарности и источники
 
-- [wiktorbgu/mihomo-mikrotik](https://hub.docker.com/r/wiktorbgu/mihomo-mikrotik) — контейнер mihomo для MikroTik
-- [runetfreedom](https://github.com/runetfreedom) — российские GeoIP/GeoSite базы
-- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — VLESS + Reality протокол
-- Статья [Habr: v2rayN для России](https://habr.com/ru/articles/853796/)
+Этот проект построен на труде следующих авторов и сообществ:
+
+### Ключевые компоненты
+
+- **[wiktorbgu/mihomo-mikrotik](https://hub.docker.com/r/wiktorbgu/mihomo-mikrotik)** — Docker-контейнер mihomo для MikroTik RouterOS. Упрощает развёртывание прокси-клиента на роутере.
+
+- **[runetfreedom](https://github.com/runetfreedom)** — поддерживает актуальные GeoIP/GeoSite базы для маршрутизации. Репозитории:
+  - [russia-blocked-geoip](https://github.com/runetfreedom/russia-blocked-geoip) — IP-базы
+  - [russia-blocked-geosite](https://github.com/runetfreedom/russia-blocked-geosite) — доменные базы
+  - Автообновление через GitHub Actions каждые 6 часов
+  - Лицензия: GPL-3.0
+
+- **[XTLS/Xray-core](https://github.com/XTLS/Xray-core)** — протокол VLESS и технология Reality для защищённых туннелей. Открытый исходный код.
+
+### Источники данных
+
+- [antifilter.download](https://antifilter.download) — агрегатор данных о сетевой доступности
+
+### Статьи и вдохновение
+
+- [v2rayN для России (Habr)](https://habr.com/ru/articles/853796/) — статья о региональных пресетах для v2rayN, вдохновившая на GeoIP-подход вместо ручных списков
+
+### Фреймворки и утилиты
+
+- [Mihomo (Clash Meta)](https://github.com/MetaCubeX/mihomo) — ядро прокси-клиента
+- [MikroTik RouterOS](https://mikrotik.com) — сетевая операционная система
+- [3x-ui](https://github.com/MHSanaei/3x-ui) — панель управления Xray
+
+Всем авторам — благодарность за открытый код и свободный доступ к своим наработкам.

@@ -25,9 +25,9 @@ proxy-groups:
     use:
       - SRV
 
-# Автообновляемые блок-листы РКН (каждые 6 часов)
+# Автообновляемые гео-базы (каждые 6 часов)
 rule-providers:
-  # IP из реестра РКН (antifilter)
+  # IP гео-данные (antifilter)
   ru-blocked:
     type: http
     behavior: ipcidr
@@ -36,7 +36,7 @@ rule-providers:
     interval: 21600
     path: ./rules/ru-blocked.mrs
 
-  # Community-список ТСПУ-блокировок
+  # Community-список специальных списков
   ru-blocked-community:
     type: http
     behavior: ipcidr
@@ -59,7 +59,7 @@ listeners:
     - 198.19.0.1/30
 
 rules:
-  # Заблокированные РКН — ВСЕГДА VPN (даже если IP похож на RU)
+  # Иностранные IP — всегда — ВСЕГДА VPN (даже если IP похож на RU)
   - RULE-SET,ru-blocked,SELECTOR
   - RULE-SET,ru-blocked-community,SELECTOR
   # Локальная сеть — мимо VPN
