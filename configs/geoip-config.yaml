@@ -1,0 +1,72 @@
+# Mihomo GeoIP VPN конфигурация
+# Замените my-srv.yaml на свою VLESS-ссылку!
+external-controller: 0.0.0.0:9090
+external-ui: ui
+secret: ЗАМЕНИТЕ_СЕКРЕТ
+unified-delay: true
+log-level: info
+ipv6: false
+
+# Провайдер VLESS-сервера
+proxy-providers:
+  SRV:
+    type: file
+    path: /etc/mihomo/my-srv.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+      lazy: true
+      timeout: 5000
+
+proxy-groups:
+  - name: SELECTOR
+    type: select
+    use:
+      - SRV
+
+# Автообновляемые блок-листы РКН (каждые 6 часов)
+rule-providers:
+  # IP из реестра РКН (antifilter)
+  ru-blocked:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/mrs/ru-blocked.mrs"
+    interval: 21600
+    path: ./rules/ru-blocked.mrs
+
+  # Community-список ТСПУ-блокировок
+  ru-blocked-community:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/mrs/ru-blocked-community.mrs"
+    interval: 21600
+    path: ./rules/ru-blocked-community.mrs
+
+listeners:
+  - name: mixed-in
+    type: mixed
+    port: 1080
+  - name: tun-in
+    type: tun
+    stack: mixed  # ВАЖНО: не mips!
+    auto-detect-interface: true
+    auto-route: true
+    auto-redirect: true
+    inet4-address:
+    - 198.19.0.1/30
+
+rules:
+  # Заблокированные РКН — ВСЕГДА VPN (даже если IP похож на RU)
+  - RULE-SET,ru-blocked,SELECTOR
+  - RULE-SET,ru-blocked-community,SELECTOR
+  # Локальная сеть — мимо VPN
+  - GEOIP,private,DIRECT,no-resolve
+  # Российские домены — напрямую
+  - GEOSITE,category-ru,DIRECT
+  # Российские IP — напрямую
+  - GEOIP,RU,DIRECT
+  # ВСЁ ОСТАЛЬНОЕ — через VPN
+  - MATCH,SELECTOR

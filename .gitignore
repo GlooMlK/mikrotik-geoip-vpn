@@ -1,0 +1,18 @@
+# Секреты — НИКОГДА не коммитить!
+my-srv.yaml
+*.env
+.env
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Кэш
+__pycache__/
+*.pyc

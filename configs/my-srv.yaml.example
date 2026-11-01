@@ -1,0 +1,8 @@
+# Замените на свою VLESS-ссылку от вашего VPN-сервера
+# Получите её из панели 3x-ui или из конфига Xray
+#
+# Формат:
+# vless://UUID@СЕРВЕР:ПОРТ?encryption=none&flow=xtls-rprx-vision&fp=firefox&pbk=ПУБЛИЧНЫЙ_КЛЮЧ&security=reality&sid=SHORT_ID&sni=ВАШ_SNI&spx=%2FПУТЬ&type=tcp#ИМЯ
+#
+# Пример (ЗАМЕНИТЕ ВСЕ ЗНАЧЕНИЯ):
+# vless://00000000-0000-0000-0000-000000000000@1.2.3.4:8443?encryption=none&flow=xtls-rprx-vision&fp=firefox&pbk=ВАШ_ПУБЛИЧНЫЙ_КЛЮЧ&security=reality&sid=ВАШ_SHORT_ID&sni=www.example.com&spx=%2Fpath&type=tcp#my-vpn
