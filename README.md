@@ -208,3 +208,32 @@ scp configs/rules/*.mrs admin@МИКРОТИК:/usb1-part1/containers/etc/mihomo
 ```yaml
   - DOMAIN-SUFFIX,проблемный-сайт.ru,DIRECT
 ```
+
+## Известные проблемы и решения
+
+### Google Gemini / "Antigravity" — блокировка через WARP
+**Симптом:** При авторизации "в вашем регионе недоступно".
+**Причина:** Google блокирует Cloudflare WARP IP как VPN, даже из поддерживаемых стран.
+**Решение:** Маррутизировать gemini через direct (VPS IP) вместо warp на VPN-сервере:
+```json
+// Xray routing на VPS:
+{"domain": ["geosite:google-gemini"], "outboundTag": "direct"}  // НЕ warp!
+```
+Если VPS в поддерживаемой стране (France поддерживает Gemini) — работает.
+
+### Telegram звонки — блокировка QUIC REJECT
+**Симптом:** Звонки не проходят, сообщения работают.
+**Причина:** Бланкетный QUIC REJECT (UDP 443) блокирует STUN/TURN трафик.
+**Решение:** Telegram IP-CIDR правила ПЕРЕД QUIC REJECT:
+```yaml
+- IP-CIDR,149.154.160.0/20,SELECTOR,no-resolve  # до REJECT
+- IP-CIDR,91.108.0.0/16,SELECTOR,no-resolve
+```
+
+### Госсайты (nalog.ru и др.) — ложные срабатывания блок-листов
+**Симптом:** lkfl2.nalog.ru не открывается.
+**Причина:** IP гос-сайтов попадают в antifilter блок-листы.
+**Решение:** DOMAIN-SUFFIX правила для гос-доменов ПЕРЕД блок-листами:
+```yaml
+- DOMAIN-SUFFIX,nalog.ru,DIRECT  # до RULE-SET,ru-blocked
+```
