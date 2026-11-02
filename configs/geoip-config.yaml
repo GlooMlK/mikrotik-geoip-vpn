@@ -68,17 +68,17 @@ listeners:
 
 rules:
   # ═══════════════════════════════════════════════════
-  # Telegram звонки (UDP STUN/TURN) — через VPN ДО QUIC REJECT
-  # Иначе QUIC REJECT блокирует voice traffic
+  # Telegram звонки (UDP STUN/TURN) — через VPN
   # ═══════════════════════════════════════════════════
   - IP-CIDR,149.154.160.0/20,SELECTOR,no-resolve
   - IP-CIDR,91.108.0.0/16,SELECTOR,no-resolve
   - IP-CIDR,95.161.64.0/20,SELECTOR,no-resolve
   - IP-CIDR,185.76.151.0/24,SELECTOR,no-resolve
 
-  # QUIC (UDP 443) — блокируем ДЛЯ ОСТАЛЬНЫХ (не Telegram)
-  # Telegram UDP уже прошли выше через SELECTOR
-  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
+  # ВАЖНО: НЕ блокируйте QUIC (UDP 443) правилом REJECT!
+  # Молчаливый REJECT заставляет браузер ждать таймаута HTTP/3
+  # и откатываться на TCP — все сайты «открываются медленно».
+  # QUIC внутри VPN-туннеля невидим для DPI, как и любой трафик.
 
   # ═══════════════════════════════════════════════════
   # Госсайты РФ — ВСЕГДА DIRECT (до блок-листов!)

@@ -83,3 +83,25 @@ url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/releas
 3. **Нет искл. локалки в mangle** — потеряете SSH к роутеру
 4. **Контейнер :latest** — автообновление может сломать. Пиньте тег
 5. **Xray-core обновлён** — Reality-auth ломается. Пиньте версию
+6. **`smux=true` в VLESS-ссылке** — НЕ используйте с `flow=xtls-rprx-vision`:
+   head-of-line blocking («все сайты медленно»), ломает UDP (звонки Telegram
+   висят на «установка защищенного соединения»), портит TLS-профиль Vision.
+7. **QUIC REJECT (`AND,((NETWORK,udp),(DST-PORT,443)),REJECT`)** — НЕ добавляйте:
+   браузер ждёт таймаута HTTP/3 на каждом сайте и откатывается на TCP.
+   Выглядит как «интернет тормозит». QUIC внутри туннеля DPI не виден.
+
+## Диагностика «всё медленно»
+
+```bash
+# 1. Физический RTT до VPN-сервера (с роутера, минуя туннель) — норма 50-100ms для EU
+/ping 203.0.113.10 count=6
+
+# 2. Задержка по мнению mihomo (весь прокси-трейл)
+curl http://12.0.0.5:9090/group/SELECTOR/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000 -H "Authorization: Bearer СЕКРЕТ"
+# норма: физический RTT + 10-30ms
+
+# 3. Путь до контейнера (должно быть < 5ms)
+curl http://12.0.0.5:9090/version -H "Authorization: Bearer СЕКРЕТ" -w "%{time_total}\n" -o /dev/null
+```
+
+Если (1) и (2) в норме, а сайты медленно — проверьте пункты 6 и 7 выше.
