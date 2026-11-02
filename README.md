@@ -1,72 +1,84 @@
 # MikroTik + Mihomo + VLESS Reality + GeoIP Router
 
-Автоматическая GeoIP-маршрутизация на роутере MikroTik: российские ресурсы — напрямую, иностранные — через VPN-туннель. Без ручных списков, с автообновлением гео-баз каждые 6 часов.
+GeoIP-разделение трафика на роутере MikroTik в два уровня: **российский — напрямую ядром роутера на линейной скорости**, иностранное — через VLESS+Reality в контейнере mihomo. Без ручных списков доменов, с автообновлением блок-листов каждые 6 часов.
 
 > **Note:** Проект — сетевая конфигурация маршрутизации. Применяется для: доступа к рабочим ресурсам при командировках, защиты трафика в публичных сетях, разделения внутреннего и внешнего трафика в корпоративных сетях. Пользователь самостоятельно обеспечивает соответствие законодательству своей юрисдикции.
 
 ## Архитектура
 
+Ключевая идея: **RU-трафик не должен проходить через userspace-прокси** — это и скорость (ядро vs контейнер), и CPU (2-ядерные ARM). Поэтому разделение делается дважды: грубо на роутере (address-list из RIPE), точно в mihomo (GeoIP).
+
 ```
 [LAN устройства]
        |
-       v (mangle: весь трафик → mihomo)
-[MikroTik] --veth--> [mihomo container]
-                          |
-                    GeoIP правила:
-                    ├── RULE-SET ru-blocked ──────────→ VPN
-                    ├── RULE-SET ru-blocked-community ─→ VPN
-                    ├── GEOIP private (RFC6890) ──────→ DIRECT
-                    ├── GEOSITE category-ru ──────────→ DIRECT
-                    ├── GEOIP RU ─────────────────────→ DIRECT
-                    └── MATCH (всё остальное) ────────→ VPN
-                          |
-                    VPN: VLESS + Reality → ваш сервер
-                          |
-                    [VPS] → интернет
+       v  mangle prerouting:
+       ├── 1. dst ∈ RU_GEO (11.5K CIDR от RIPE) ──→ ACCEPT, ядро → провайдер
+       │      (RU на линейной скорости, контейнер не задействован)
+       └── 2. всё остальное → routing-mark to-vless → veth → контейнер
+                |
+           [mihomo container]  (только иностранное + заблокированное)
+                ├── IP-CIDR Telegram DC (звонки) ──→ VPN
+                ├── RULE-SET ru-blocked ─────────→ VPN
+                ├── GEOIP private ───────────────→ DIRECT
+                ├── GEOSITE category-ru ─────────→ DIRECT  (страховка RU_GEO)
+                ├── GEOIP RU ────────────────────→ DIRECT  (страховка RU_GEO)
+                ├── UDP 443 (QUIC) ──────────────→ REJECT  (только иностранное)
+                └── MATCH ───────────────────────→ VPN
+                |
+           VLESS + Reality (xtls-rprx-vision, БЕЗ mux) → [VPS] → интернет
 ```
+
+Fail-closed: VPN/контейнер мёртв → иностранный трафик черную дыру (не утечёт в DIRECT), RU и локалка продолжают работать ядром.
 
 ## Что это даёт
 
 | Преимущество | Как работает |
 |---|---|
-| **Ноль ручных списков** | GeoIP-базы решают автоматически |
+| **Ноль ручных списков** | RIPE-delegated (RU_GEO) + GeoIP-базы решают автоматически |
 | **Иностранный сервис?** | Автоматически VPN (не RU IP) |
 | **Новый банк/гос-сайт?** | Автоматически DIRECT (RU IP) |
-| **Приложение без DNS (голый IP)** | GeoIP проверяет по IP |
-| **Автообновление** | Гео-базы обновляются каждые 6 часов |
-| **Fail-closed** | VPN недоступен → иностранные ресурсы недоступны (не уйдут в DIRECT) |
-| **RU-ресурсы на полной скорости** | 45-60 мс напрямую |
+| **RU на линейной скорости** | Ядро роутера, без VPN-детура (замер: 378+ Мбит/с) |
+| **Низкий CPU** | Контейнер видит только иностранное (замер: 13% вместо 98%) |
+| **Автообновление** | Блок-листы каждые 6 часов; RU_GEO — пересборка раз в 1-3 мес |
+| **Fail-closed** | VPN недоступен → иностранное недоступно (не уйдёт в DIRECT) |
+| **Самовосстановление** | restart-policy + memory-max + watchdog (см. ниже) |
 
 ## Требования
 
-- MikroTik RouterOS 7.x с поддержкой containers (ARM/ARM64)
+- MikroTik RouterOS **7.13+** с поддержкой containers (ARM/ARM64)
 - USB-накопитель для контейнеров
 - VPS с VLESS + Reality (Xray)
-- 256+ МБ RAM на роутере (проверено на 256 МБ — работает, 128 МБ — не рекомендуется)
+- 256+ МБ RAM на роутере (с lite-конфигом контейнер занимает 14-50 МБ)
 
 ## Быстрый старт
 
 ### 1. Подготовка VPS
 
-Установите [3x-ui](https://github.com/MHSanaei/3x-ui) или Xray вручную. Создайте VLESS + Reality инбаунд.
+Установите [3x-ui](https://github.com/MHSanaei/3x-ui) или Xray вручную. Создайте VLESS + Reality инбаунд. **Панель обязательно закройте** (firewall по своим IP / 127.0.0.1 + SSH-tunnel) — открытая панель = украденные креды всех клиентов.
 
-### 2. Установка контейнера на MikroTik
+### 2. Установка на MikroTik
+
+Полный идемпотентный скрипт: **`scripts/setup-mikrotik.rsc`** (замените в нём подсеть и секрет). Ключевые шаги вручную:
 
 ```routeros
-# Включаем containers
-/device-mode update container=yes
+# IPv6 отключаем ОБЯЗАТЕЛЬНО (иначе v6-трафик ходит мимо всей системы!)
+/ipv6 settings set disable-ipv6=yes
 
-# Создаём veth
-/interface veth add name=MIHOMO address=12.0.0.2/24 gateway=12.0.0.1
+# veth: address = IP контейнера, gateway = IP роутера на veth
+/interface veth add name=MIHOMO address=12.0.0.5/24 gateway=12.0.0.2
+/ip address add address=12.0.0.2/24 interface=MIHOMO
 
-# Добавляем bridge-порт
-/interface bridge port add bridge=bridge interface=MIHOMO
+# Таблица маршрутизации
+/routing table add name=to-vless fib
+/ip route add dst-address=0.0.0.0/0 gateway=12.0.0.5 routing-table=to-vless comment="via mihomo"
 
-# IP на bridge для veth
-/ip address add address=12.0.0.1/24 interface=bridge
-
-# Контейнер
-/container add remote-image=wiktorbgu/mihomo-mikrotik:1.19.30 interface=MIHOMO envlist=MIHOMO start-on-boot=yes
+# Контейнер (envs и mounts — ДО container add!)
+/container mounts add list=mihomo-cfg src=/usb1-part1/containers/etc/mihomo dst=/etc/mihomo
+/container envs add list=MIHOMO key=CONFIG value=geoip-config.yaml
+/container add remote-image=wiktorbgu/mihomo-mikrotik:1.19.30 \
+  interface=MIHOMO envlist=MIHOMO mounts=mihomo-cfg start-on-boot=yes \
+  restart-policy=on-failure restart-max-count=10 restart-interval=10s \
+  memory-max=150MiB logging=yes comment="GeoIP VPN"
 ```
 
 ### 3. Конфигурация
@@ -75,56 +87,72 @@
 
 ```
 /usb1-part1/containers/etc/mihomo/
-├── geoip-config.yaml    ← основной конфиг
+├── geoip-config.yaml    ← полный конфиг (512 МБ роутеры)
+├── geoip-lite.yaml      ← lite для 256 МБ (см. раздел ниже)
 ├── my-srv.yaml          ← ссылка VLESS (замените на свою!)
-└── rules/               ← создастся автоматически
+└── rules/*.mrs          ← блок-листы (в репо, для офлайн-старта)
 ```
 
-Замените в `my-srv.yaml` ссылку на свою:
+Ссылка (`my-srv.yaml`) — из своего инбаунда:
 ```
-vless://ВАШ_UUID@ВАШ_СЕРВЕР:ВАШ_ПОРТ?...&sni=ВАШ_SNI&...#имя
+vless://ВАШ_UUID@ВАШ_СЕРВЕР:ВАШ_ПОРТ?...&flow=xtls-rprx-vision&type=tcp#имя
 ```
+⚠️ **НЕ добавляйте `smux=true`** — с `xtls-rprx-vision` это ломает UDP (звонки Telegram висят), замедляет всё и портит TLS-профиль Vision (см. troubleshooting, грабля 6).
 
-### 4. Маунт и запуск
+### 4. DNS (для полного конфига)
+
+Доменные правила (гос-сайты, category-ru) работают только если mihomo строит карту «домен↔IP» по своим DNS-ответам. Перехватываем DNS LAN → контейнер:
 
 ```routeros
-/container mounts add list=mihomo-cfg src=/usb1-part1/containers/etc/mihomo dst=/etc/mihomo
-/container set 0 mountlist=mihomo-cfg
-/container envs add list=MIHOMO key=CONFIG value=geoip-config.yaml
-/container restart 0
+/ip firewall nat add chain=dstnat action=dst-nat to-addresses=12.0.0.5 to-ports=53 \
+    protocol=udp dst-port=53,1253,5353 in-interface=bridge dst-address-list=!local \
+    comment="DNS -> mihomo udp"
+# и то же для protocol=tcp
 ```
+Для lite-конфига не нужно — клиенты остаются на DNS роутера.
 
 ### 5. Маршрутизация (mangle)
 
 ```routeros
-# Отключаем старые правила (если были)
-/ip firewall mangle disable 0,1,2
-
-# Единственное правило: весь LAN-трафик через mihomo
+# Сначала RU-байпас (см. следующий раздел — ОБЯЗАТЕЛЕН для lite, рекомендован всем)
+# затем: весь остальной LAN-трафик через mihomo
 /ip firewall mangle add \
-  chain=prerouting \
-  action=mark-routing \
-  new-routing-mark=to-vless \
-  passthrough=no \
-  in-interface=bridge \
+  chain=prerouting action=mark-routing new-routing-mark=to-vless \
+  passthrough=no in-interface=bridge \
   dst-address=!192.168.Х.0/24 \
   comment="ALL LAN via mihomo"
-
-# Таблица маршрутизации
-/ip route add dst-address=0.0.0.0/0 gateway=12.0.0.5 routing-table=to-vless
 ```
+**Замените `192.168.Х.0/24` на вашу локальную подсеть!** Несколько подсетей/VLAN — используйте `dst-address-list=LOCAL_NETS`.
 
-**Замените `192.168.Х.0/24` на вашу локальную подсеть!**
+### 6. Watchdog (рекомендуется)
 
-### 6. Проверка
+Контейнер может зависнуть «работает, но не отвечает» (наблюдалось на 256 МБ). Watchdog проверяет API раз в минуту и сам перезапускает:
+
+```routeros
+/system scheduler add name=mihomo-watchdog interval=1m \
+  policy=ftp,read,write,policy,test on-event={
+    :do { /tool fetch url="http://12.0.0.5:9090/version" \
+        http-header-field="Authorization: Bearer ВАШ_СЕКРЕТ" output=user
+    } on-error={
+        :if ([/container get [find] running]) do={ /container restart [find] } \
+        else={ /container start [find] }
+    }
+  }
+```
+⚠️ `policy=ftp` обязательна — без неё `/tool fetch` в шедулере молча падает (ловили на проде).
+
+### 7. Проверка
 
 С устройства в LAN:
 ```bash
-# RU-ресурс (должен быть быстрый, ~50мс)
-curl -o /dev/null -w "%{time_total}s" https://ya.ru/
+# RU-ресурс — быстрый, ядром роутера
+curl -o /dev/null -w "%{time_total}s\n" https://ya.ru/
 
-# Иностранный ресурс (должен работать через VPN)
-curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
+# Иностранное — через VPN
+curl -o /dev/null -w "%{time_total}s\n" https://api.telegram.org/
+
+# Анти-утечка: должен показать IP вашего VPS
+curl ifconfig.me
 ```
 
 ## Файлы
@@ -194,12 +222,10 @@ CIDR → MATCH→VPN (RU отсекается раньше — списком RU
 
 ## Откат
 
-```routeros
-/ip firewall mangle enable 0,1,2
-/ip firewall mangle disable [find comment="ALL LAN via mihomo"]
-/container envs set [find key="CONFIG"] value=default_config.yaml
-/container restart 0
-```
+Выполните `scripts/rollback.rsc` — он отключает ВСЁ внедрённое (mangle-правила,
+DNS-редирект, watchdog) по комментариям и возвращает LAN на прямую маршрутизацию
+через провайдера. Не включайте правила по номерам (`enable 0,1,2`) — на чужом
+роутере это случайные правила.
 
 ## Лицензия
 
@@ -264,14 +290,23 @@ scp configs/rules/*.mrs admin@МИКРОТИК:/usb1-part1/containers/etc/mihomo
 ```
 Если VPS в поддерживаемой стране (France поддерживает Gemini) — работает.
 
-### Telegram звонки — блокировка QUIC REJECT
-**Симптом:** Звонки не проходят, сообщения работают.
-**Причина:** Бланкетный QUIC REJECT (UDP 443) блокирует STUN/TURN трафик.
-**Решение:** Telegram IP-CIDR правила ПЕРЕД QUIC REJECT:
-```yaml
-- IP-CIDR,149.154.160.0/20,SELECTOR,no-resolve  # до REJECT
-- IP-CIDR,91.108.0.0/16,SELECTOR,no-resolve
-```
+### Telegram звонки — висят на «Установка защищенного соединения»
+**Симптом:** Сообщения работают, звонок после принятия вечно «устанавливает соединение».
+**Причина (найдена на проде, три слоя):**
+1. Сигналинг звонков шёл через WARP (Cloudflare) на VPS — сервис звонков Telegram
+   игнорирует WARP-IP, E2E-хендшейк не начинался
+2. `smux=true` в VLESS-ссылке ломал XUDP-сессии (`closed pipe` в логах Xray)
+3. Релейный трафик (порты 4000/19302) не должен попадать под QUIC REJECT (UDP 443)
+
+**Решение:**
+- На VPS: `geosite:telegram` + `149.154.160.0/20`, `91.108.0.0/16` → outbound **direct**
+  (НЕ warp; проверка: в access.log Xray `tcp:149.154.* [.. -> direct]`)
+- В ссылке: **без smux** (грабля 6)
+- В конфиге: Telegram IP-CIDR → VPN в начале правил (уже есть в обоих конфигах)
+
+Диагностика тракта: перехватите реальный init-пакет релея (`tcpdump -X udp port 4000`),
+отправьте те же байты с LAN-устройства через туннель — если ack возвращается,
+тракт исправен и проблема в сигналинге.
 
 ### Госсайты (nalog.ru и др.) — ложные срабатывания блок-листов
 **Симптом:** lkfl2.nalog.ru не открывается.
