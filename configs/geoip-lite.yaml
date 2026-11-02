@@ -1,0 +1,92 @@
+# Mihomo LITE — для роутеров MikroTik с 256 МБ RAM
+# ═══════════════════════════════════════════════════
+# Экономия ~25-40 МБ: без GeoIP-базы (8МБ), без GeoSite,
+# без DNS-сервера, без доменных правил.
+#
+# ⚠️ ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: RU-байпас на уровне роутера —
+# address-list RU_GEO (scripts/ru-geo.py) + mangle accept
+# dst-address-list=RU_GEO ПЕРЕД правилом "ALL LAN via mihomo".
+# Весь RU-трафик до этого контейнера не доходит; всё, что
+# сюда попало — иностранное (или заблокированное РКН).
+external-controller: 0.0.0.0:9090
+external-ui: ui
+secret: ЗАМЕНИТЕ_СЕКРЕТ
+unified-delay: true
+log-level: warning
+ipv6: false
+
+proxy-providers:
+  SRV:
+    type: file
+    path: /etc/mihomo/my-srv.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 600
+      lazy: true
+      timeout: 5000
+
+proxy-groups:
+  - name: SELECTOR
+    type: select
+    use:
+      - SRV
+
+rule-providers:
+  ru-blocked:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/mrs/ru-blocked.mrs"
+    interval: 21600
+    path: ./rules/ru-blocked.mrs
+
+  ru-blocked-community:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/mrs/ru-blocked-community.mrs"
+    interval: 21600
+    path: ./rules/ru-blocked-community.mrs
+
+listeners:
+  - name: mixed-in
+    type: mixed
+    port: 1080
+  - name: tun-in
+    type: tun
+    stack: mixed  # ВАЖНО: не mips!
+    auto-detect-interface: true
+    auto-route: true
+    auto-redirect: true
+    inet4-address:
+    - 198.19.0.1/30
+
+rules:
+  # Telegram звонки (UDP STUN/TURN, порты 4000/19302) — через VPN
+  - IP-CIDR,149.154.160.0/20,SELECTOR,no-resolve
+  - IP-CIDR,91.108.0.0/16,SELECTOR,no-resolve
+  - IP-CIDR,95.161.64.0/20,SELECTOR,no-resolve
+  - IP-CIDR,185.76.151.0/24,SELECTOR,no-resolve
+
+  # QUIC (UDP 443) в туннеле — REJECT (шторм ретрансмиссий жжёт CPU)
+  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
+
+  # Заблокированные РКН ресурсы (у которых хостинг не в RU) — через VPN
+  - RULE-SET,ru-blocked,SELECTOR
+  - RULE-SET,ru-blocked-community,SELECTOR
+
+  # Приватные/служебные диапазоны — напрямую (вместо GEOIP,private,
+  # чтобы не тянуть 8-мегабайтную базу)
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,12.0.0.0/24,DIRECT,no-resolve
+  - IP-CIDR,198.18.0.0/15,DIRECT,no-resolve
+  - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+
+  # Всё остальное — иностранное — через VPN
+  - MATCH,SELECTOR

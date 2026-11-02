@@ -132,11 +132,45 @@ curl -o /dev/null -w "%{time_total}s" https://api.telegram.org/
 | Файл | Назначение |
 |---|---|
 | `configs/geoip-config.yaml` | Основной конфиг mihomo с GeoIP-маршрутизацией |
+| `configs/geoip-lite.yaml` | **LITE для роутеров 256 МБ RAM** (−25-40 МБ памяти) |
 | `configs/my-srv.yaml.example` | Шаблон VLESS-ссылки (заменить на свою) |
 | `scripts/setup-mikrotik.rsc` | Полный скрипт настройки MikroTik |
+| `scripts/ru-geo.py` | Генератор RU_GEO address-list (RIPE, 11.5K CIDR) |
 | `scripts/rollback.rsc` | Откат на стандартную маршрутизацию |
 | `docs/architecture.md` | Подробное описание архитектуры |
 | `docs/troubleshooting.md` | Решение проблем |
+
+## Роутеры с 256 МБ RAM (Pro-M, hAP и т.п.)
+
+На 256-мегабайтных роутерах полный конфиг (GeoIP-база 8 МБ + GeoSite + DNS)
+доводит контейнер до 85-116 МБ, роутер время от времени убивает его по OOM.
+Рецепт для 256 МБ — **RU-байпас + lite-конфиг**:
+
+```bash
+# 1. RU-список на роутере (RU-трафик пойдёт мимо контейнера, ядром, линейно)
+python3 scripts/ru-geo.py          # → ru_geo.rsc (11.5K записей)
+scp ru_geo.rsc admin@РОУТЕР:ru_geo.rsc
+```
+```routeros
+# 2. На роутере:
+/import file=ru_geo.rsc
+/ip firewall mangle add chain=prerouting action=accept \
+    dst-address-list=RU_GEO in-interface=bridge \
+    comment="RU GeoIP bypass container" place-before=4
+#    (place-before = номер правила "ALL LAN via mihomo")
+
+# 3. Lite-конфиг вместо основного:
+#    залить configs/geoip-lite.yaml в /etc/mihomo контейнера и
+/container env set [find key="CONFIG"] value=geoip-lite.yaml
+
+# 4. Защита от OOM (контейнер сам перезапустится за 10 сек):
+/container set 0 restart-policy=on-failure restart-max-count=10 \
+    restart-interval=10s memory-max=150MiB
+/container env add list=МИХОМО key=GOGC value=40
+```
+
+Замеры на реальном стенде (256 МБ): контейнер **14-51 МБ** вместо 85-116,
+RU-трафик 378+ Мбит/с (ядром роутера), CPU 13% вместо 98%.
 
 ## Структура правил (приоритет)
 
