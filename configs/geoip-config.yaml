@@ -7,6 +7,15 @@ unified-delay: true
 log-level: info
 ipv6: false
 
+# DNS — mihomo сам отвечает на DNS-запросы
+# Решает проблему UDP DNS timeout через TUN
+dns:
+  enable: true
+  listen: 0.0.0.0:53
+  nameserver:
+    - 77.88.8.8        # Яндекс (RU, быстрый)
+    - 1.1.1.1          # Cloudflare (резерв)
+
 # Провайдер VLESS-сервера
 proxy-providers:
   SRV:
@@ -58,6 +67,10 @@ listeners:
     - 198.19.0.1/30
 
 rules:
+  # Блокируем QUIC (UDP 443) — DPI не может различить зашифрованный QUIC
+  # Браузер fallback на TCP → TLS → GeoIP работает корректно
+  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
+
   # ═══════════════════════════════════════════════════
   # Госсайты РФ — ВСЕГДА DIRECT (до блок-листов!)
   # Защита от ложных срабатываний antifilter на гос-IP
