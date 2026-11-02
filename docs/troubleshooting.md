@@ -149,7 +149,7 @@ RU-сайт перестал открываться — проверьте, не
 
 ```bash
 # 1. Физический RTT до VPN-сервера (с роутера, минуя туннель) — норма 50-100ms для EU
-/ping 203.0.113.10 count=6
+/ping IP_ВАШЕГО_VPS count=6
 
 # 2. Задержка по мнению mihomo (весь прокси-трейл)
 curl http://12.0.0.5:9090/group/SELECTOR/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000 -H "Authorization: Bearer СЕКРЕТ"
