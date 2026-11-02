@@ -156,17 +156,18 @@ scp ru_geo.rsc admin@РОУТЕР:ru_geo.rsc
 /import file=ru_geo.rsc
 /ip firewall mangle add chain=prerouting action=accept \
     dst-address-list=RU_GEO in-interface=bridge \
-    comment="RU GeoIP bypass container" place-before=4
-#    (place-before = номер правила "ALL LAN via mihomo")
+    comment="RU GeoIP bypass container"
+# затем поднимите ПЕРЕД правилом "ALL LAN" (не по номерам — они плывут):
+/ip firewall mangle move [find comment="RU GeoIP bypass container"] [find comment="ALL LAN via mihomo"]
 
 # 3. Lite-конфиг вместо основного:
 #    залить configs/geoip-lite.yaml в /etc/mihomo контейнера и
-/container env set [find key="CONFIG"] value=geoip-lite.yaml
+/container envs set [find list="MIHOMO" && key="CONFIG"] value=geoip-lite.yaml
 
 # 4. Защита от OOM (контейнер сам перезапустится за 10 сек):
 /container set 0 restart-policy=on-failure restart-max-count=10 \
     restart-interval=10s memory-max=150MiB
-/container env add list=МИХОМО key=GOGC value=40
+/container envs add list=MIHOMO key=GOGC value=40
 ```
 
 Замеры на реальном стенде (256 МБ): контейнер **14-51 МБ** вместо 85-116,
@@ -175,13 +176,21 @@ RU-трафик 378+ Мбит/с (ядром роутера), CPU 13% вмест
 ## Структура правил (приоритет)
 
 ```
-1. RULE-SET ru-blocked           → VPN
-2. RULE-SET ru-blocked-community → VPN
-3. GEOIP private                 → DIRECT (локалка RFC6890)
-4. GEOSITE category-ru           → DIRECT (RU-домены)
-5. GEOIP RU                      → DIRECT (RU IP-адреса)
-6. MATCH                         → VPN (всё остальное)
+Полный конфиг (geoip-config.yaml):
+1. IP-CIDR Telegram DC        → VPN   (звонки: STUN/релеи до QUIC REJECT)
+2. DOMAIN-SUFFIX гос/банки RF → DIRECT
+3. RULE-SET ru-blocked        → VPN   (заблокированные РКН)
+4. RULE-SET ru-blocked-community → VPN
+5. GEOIP private              → DIRECT
+6. GEOSITE category-ru        → DIRECT
+7. GEOIP RU                   → DIRECT
+8. UDP 443 (QUIC)             → REJECT (только иностранный долетает)
+9. MATCH                      → VPN
+
+Lite (geoip-lite.yaml): Telegram → QUIC REJECT → RULE-SET → приватные
+CIDR → MATCH→VPN (RU отсекается раньше — списком RU_GEO на роутере)
 ```
+
 
 ## Откат
 
@@ -248,7 +257,7 @@ scp configs/rules/*.mrs admin@МИКРОТИК:/usb1-part1/containers/etc/mihomo
 ### Google Gemini / "Antigravity" — блокировка через WARP
 **Симптом:** При авторизации "в вашем регионе недоступно".
 **Причина:** Google блокирует Cloudflare WARP IP как VPN, даже из поддерживаемых стран.
-**Решение:** Маррутизировать gemini через direct (VPS IP) вместо warp на VPN-сервере:
+**Решение:** Маршрутизировать gemini через direct (VPS IP) вместо warp на VPN-сервере:
 ```json
 // Xray routing на VPS:
 {"domain": ["geosite:google-gemini"], "outboundTag": "direct"}  // НЕ warp!

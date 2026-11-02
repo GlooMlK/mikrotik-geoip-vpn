@@ -59,22 +59,22 @@ dig +short иностранный-ресурс.com
 /container stop 0; delay 15s; /container start 0
 ```
 
-## Гео-базаы не обновляются
+## Гео-базы не обновляются
 
 Проверьте что контейнер может достучаться до GitHub:
 ```routeros
 /tool fetch url="https://raw.githubusercontent.com/" output=user
 ```
 
-Если GitHub недоступен — гео-базаы будут использовать кэш.
+Если GitHub недоступен — гео-базы будут использовать кэш.
 
 ## Высокое потребление RAM
 
 Контейнер mihomo + GeoIP базы ~50-80 МБ. На роутерах с 256 МБ может не хватить.
-Решение: используйте облегчённые базы:
-```yaml
-url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/geoip-ru-only.dat"
-```
+Решение: используйте `configs/geoip-lite.yaml` — он написан для 256 МБ роутеров
+(без GeoIP-базы, GeoSite и DNS; RU-трафик уходит в kernel-bypass списком RU_GEO).
+Файл `.dat` (geodata-формат) в `rule-providers` с `format: mrs` подставлять НЕЛЬЗЯ —
+провайдер упадёт.
 
 ## Контейнер падает / зависает (OOM), интернет пропадает
 
@@ -86,7 +86,8 @@ mihomo растёт (GeoIP-базы + соединения) до предела 
 ```routeros
 /container set 0 restart-policy=on-failure restart-max-count=10 \
     restart-interval=10s memory-max=150MiB
-/container env add list=МИХОМО_ЛИСТ key=GOGC value=40   # агрессивный GC Go → меньше RSS
+/container envs add list=MIHOMO key=GOGC value=40        # агрессивный GC Go → меньше RSS
+/container envs add list=MIHOMO key=GOMEMLIMIT value=120MiB  # мягкий стоп у лимита вместо OOM
 /container stop 0; delay 5s; /container start 0
 ```
 
@@ -106,9 +107,11 @@ mihomo растёт (GeoIP-базы + соединения) до предела 
 6. **`smux=true` в VLESS-ссылке** — НЕ используйте с `flow=xtls-rprx-vision`:
    head-of-line blocking («все сайты медленно»), ломает UDP (звонки Telegram
    висят на «установка защищенного соединения»), портит TLS-профиль Vision.
-7. **QUIC REJECT без RU-байпаса** — заблокирует и российский HTTP/3:
+7. **QUIC REJECT выше GEOIP,RU** — заблокирует и российский HTTP/3:
    браузер ждёт таймаута и откатывается на TCP → «всё медленно».
-   REJECT допустим только вместе с `RU_GEO`-списком на роутере (см. ниже).
+   Правильный порядок: REJECT — ПОСЛЕ `GEOSITE,category-ru`/`GEOIP,RU,DIRECT`,
+   непосредственно перед `MATCH` (так в конфигах репозитория). Тогда до REJECT
+   долетает только иностранный QUIC.
 
 ## Медленный интернет / CPU 100%
 
@@ -116,7 +119,7 @@ mihomo растёт (GeoIP-базы + соединения) до предела 
 
 Причина: весь трафик идёт через контейнер (userspace: TUN + шифрование).
 Потолок 2-ядерных ARM ≈ 100-150 Мбит. Плюс QUIC-в-TCP вызывает шторм
-ретрансмиссий: один iPhone с iCloud-синхронностью сжигал оба ядра (98%/85%)
+ретрансмиссий: один iPhone с iCloud-синхронизацией сжигал оба ядра (98%/85%)
 на 5 Мбит трафика.
 
 **Решение: российский трафик мимо контейнера (RU-байпас).**
@@ -130,7 +133,9 @@ RU-запросы форвардятся ядром роутера на лине
 # 3. Правило ПЕРЕД "ALL LAN via mihomo":
 /ip firewall mangle add chain=prerouting action=accept \
     dst-address-list=RU_GEO in-interface=bridge \
-    comment="RU GeoIP bypass container" place-before=4
+    comment="RU GeoIP bypass container"
+# и поднять ПЕРЕД "ALL LAN":
+/ip firewall mangle move [find comment="RU GeoIP bypass container"] [find comment="ALL LAN via mihomo"]
 ```
 
 Результат на MikroTik E50UG: RU-трафик 378+ Мбит/с (было 60),

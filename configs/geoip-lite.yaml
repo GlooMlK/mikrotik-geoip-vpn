@@ -55,10 +55,11 @@ listeners:
     port: 1080
   - name: tun-in
     type: tun
-    stack: mixed  # ВАЖНО: не mips!
+    stack: mixed  # system(TCP) + gVisor(UDP); чистый system нестабилен на MIPS
     auto-detect-interface: true
     auto-route: true
-    auto-redirect: true
+    auto-redirect: true   # в RouterOS-контейнере nftables недоступен — опция фактически неактивна
+    mtu: 1500
     inet4-address:
     - 198.19.0.1/30
 
@@ -84,9 +85,16 @@ rules:
   - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
   - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
-  - IP-CIDR,12.0.0.0/24,DIRECT,no-resolve
+  - IP-CIDR,192.0.0.0/24,DIRECT,no-resolve
+  - IP-CIDR,192.0.2.0/24,DIRECT,no-resolve
   - IP-CIDR,198.18.0.0/15,DIRECT,no-resolve
+  - IP-CIDR,198.51.100.0/24,DIRECT,no-resolve
+  - IP-CIDR,203.0.113.0/24,DIRECT,no-resolve
+  - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
   - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+  # veth-подсеть контейнера (12.0.0.0/24 — публичный диапазон AT&T,
+  # но здесь это локальная сеть роутер↔контейнер)
+  - IP-CIDR,12.0.0.0/24,DIRECT,no-resolve
 
   # Всё остальное — иностранное — через VPN
   - MATCH,SELECTOR
