@@ -67,8 +67,17 @@ listeners:
     - 198.19.0.1/30
 
 rules:
-  # Блокируем QUIC (UDP 443) — DPI не может различить зашифрованный QUIC
-  # Браузер fallback на TCP → TLS → GeoIP работает корректно
+  # ═══════════════════════════════════════════════════
+  # Telegram звонки (UDP STUN/TURN) — через VPN ДО QUIC REJECT
+  # Иначе QUIC REJECT блокирует voice traffic
+  # ═══════════════════════════════════════════════════
+  - IP-CIDR,149.154.160.0/20,SELECTOR,no-resolve
+  - IP-CIDR,91.108.0.0/16,SELECTOR,no-resolve
+  - IP-CIDR,95.161.64.0/20,SELECTOR,no-resolve
+  - IP-CIDR,185.76.151.0/24,SELECTOR,no-resolve
+
+  # QUIC (UDP 443) — блокируем ДЛЯ ОСТАЛЬНЫХ (не Telegram)
+  # Telegram UDP уже прошли выше через SELECTOR
   - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
 
   # ═══════════════════════════════════════════════════
