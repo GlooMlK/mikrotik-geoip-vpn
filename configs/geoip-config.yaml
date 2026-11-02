@@ -26,8 +26,8 @@ proxy-groups:
       - SRV
 
 # Автообновляемые гео-базы (каждые 6 часов)
+# Файлы в rules/ подхватятся автоматически если уже существуют
 rule-providers:
-  # IP гео-данные (antifilter)
   ru-blocked:
     type: http
     behavior: ipcidr
@@ -36,7 +36,6 @@ rule-providers:
     interval: 21600
     path: ./rules/ru-blocked.mrs
 
-  # Community-список специальных списков
   ru-blocked-community:
     type: http
     behavior: ipcidr
@@ -59,14 +58,62 @@ listeners:
     - 198.19.0.1/30
 
 rules:
-  # Иностранные IP — всегда — ВСЕГДА VPN (даже если IP похож на RU)
+  # ═══════════════════════════════════════════════════
+  # Госсайты РФ — ВСЕГДА DIRECT (до блок-листов!)
+  # Защита от ложных срабатываний antifilter на гос-IP
+  # ═══════════════════════════════════════════════════
+  - DOMAIN-SUFFIX,nalog.ru,DIRECT
+  - DOMAIN-SUFFIX,gosuslugi.ru,DIRECT
+  - DOMAIN-SUFFIX,gov.ru,DIRECT
+  - DOMAIN-SUFFIX,pfr.ru,DIRECT
+  - DOMAIN-SUFFIX,sfr.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,fns.ru,DIRECT
+  - DOMAIN-SUFFIX,mos.ru,DIRECT
+  - DOMAIN-SUFFIX,mosreg.ru,DIRECT
+  - DOMAIN-SUFFIX,customsonline.ru,DIRECT
+  - DOMAIN-SUFFIX,rospotrebnadzor.ru,DIRECT
+  - DOMAIN-SUFFIX,garant.ru,DIRECT
+  - DOMAIN-SUFFIX,consultant.ru,DIRECT
+  - DOMAIN-SUFFIX,skbkontur.ru,DIRECT
+  - DOMAIN-SUFFIX,1tb.ru,DIRECT
+  - DOMAIN-SUFFIX,tinkoff.ru,DIRECT
+  - DOMAIN-SUFFIX,sberbank.ru,DIRECT
+  - DOMAIN-SUFFIX,vtb.ru,DIRECT
+  - DOMAIN-SUFFIX,gazprombank.ru,DIRECT
+  - DOMAIN-SUFFIX,alfabank.ru,DIRECT
+  - DOMAIN-SUFFIX,vtb24.ru,DIRECT
+  - DOMAIN-SUFFIX,rshb.ru,DIRECT
+  - DOMAIN-SUFFIX,omkbb.ru,DIRECT
+  - DOMAIN-SUFFIX,gibdd.ru,DIRECT
+  - DOMAIN-SUFFIX,mvd.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,minfin.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,economy.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,rosreestr.ru,DIRECT
+  - DOMAIN-SUFFIX,zakupki.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,budget.gov.ru,DIRECT
+  - DOMAIN-SUFFIX,uslugio.ru,DIRECT
+  - DOMAIN-SUFFIX,kadarshi.ru,DIRECT
+  - DOMAIN-SUFFIX,energovopros.ru,DIRECT
+  - DOMAIN-SUFFIX,rbc.ru,DIRECT
+  - DOMAIN-SUFFIX,avito.ru,DIRECT
+  - DOMAIN-SUFFIX,ozon.ru,DIRECT
+  - DOMAIN-SUFFIX,wildberries.ru,DIRECT
+  - DOMAIN-SUFFIX,yandex.ru,DIRECT
+  - DOMAIN-SUFFIX,yandex.net,DIRECT
+  - DOMAIN-SUFFIX,ya.ru,DIRECT
+
+  # ═══════════════════════════════════════════════════
+  # Иностранные IP — через VPN
+  # ═══════════════════════════════════════════════════
   - RULE-SET,ru-blocked,SELECTOR
   - RULE-SET,ru-blocked-community,SELECTOR
+
   # Локальная сеть — мимо VPN
   - GEOIP,private,DIRECT,no-resolve
-  # Российские домены — напрямую
+
+  # Российские домены и IP — напрямую
   - GEOSITE,category-ru,DIRECT
-  # Российские IP — напрямую
   - GEOIP,RU,DIRECT
+
   # ВСЁ ОСТАЛЬНОЕ — через VPN
   - MATCH,SELECTOR
