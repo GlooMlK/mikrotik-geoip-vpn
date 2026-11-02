@@ -76,6 +76,26 @@ dig +short иностранный-ресурс.com
 url: "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/geoip-ru-only.dat"
 ```
 
+## Контейнер падает / зависает (OOM), интернет пропадает
+
+Симптом: контейнер `exited with signal 9` в логах, LAN без DNS/VPN,
+помогает ручной перезапуск. Причина: на роутерах с 256 МБ RAM контейнер
+mihomo растёт (GeoIP-базы + соединения) до предела и убивается ядром,
+а с `restart-policy=no` сам не поднимается.
+
+```routeros
+/container set 0 restart-policy=on-failure restart-max-count=10 \
+    restart-interval=10s memory-max=150MiB
+/container env add list=МИХОМО_ЛИСТ key=GOGC value=40   # агрессивный GC Go → меньше RSS
+/container stop 0; delay 5s; /container start 0
+```
+
+`memory-max` защищает роутер (контейнер умрёт раньше, чем RouterOS),
+`on-failure` поднимет его через 10 секунд автоматически.
+Для 512 МБ роутеров ставьте `memory-max=200MiB`.
+
+Лог рестартов: `/log print where topics~"container"`.
+
 ## Известные грабли
 
 1. **TUN stack: mips** — контейнер крашится. Используйте `mixed`
