@@ -12,7 +12,7 @@ external-controller: 0.0.0.0:9090
 external-ui: ui
 secret: ЗАМЕНИТЕ_СЕКРЕТ
 unified-delay: true
-log-level: warning
+log-level: error
 ipv6: false
 
 proxy-providers:

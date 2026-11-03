@@ -4,7 +4,7 @@ external-controller: 0.0.0.0:9090
 external-ui: ui
 secret: ЗАМЕНИТЕ_СЕКРЕТ
 unified-delay: true
-log-level: info
+log-level: error
 ipv6: false
 
 # DNS — mihomo сам отвечает на DNS-запросы
