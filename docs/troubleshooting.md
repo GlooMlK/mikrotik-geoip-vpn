@@ -97,6 +97,31 @@ mihomo растёт (GeoIP-базы + соединения) до предела 
 
 Лог рестартов: `/log print where topics~"container"`.
 
+## Контейнер не ходит в интернет (TCP виснет на хендшейке)
+
+Две грабли, найденные на hAP ax³ (RouterOS 7.25beta3):
+
+1. **defconf fasttrack ломает TCP контейнера.** Правило `fasttrack-connection`
+   уводит поток в kernel fastpath, который не умеет veth: SYN уходит, SYN-ACK
+   возвращается (conntrack показывает флаг `F`), но соединение виснет навсегда.
+   UDP (DNS) при этом работает — маскирует проблему. Фикс — accept для контейнера
+   ДО fasttrack и **ОБА направления** (обратные пакеты идут с in=pppoe!):
+```routeros
+/ip firewall filter add chain=forward action=accept in-interface=MIHOMO comment="container egress (no fasttrack)"
+/ip firewall filter add chain=forward action=accept out-interface=MIHOMO comment="container return (no fasttrack)"
+# оба — ПЕРЕД правилом defconf: fasttrack
+```
+2. **PPPoE без MSS-clamping:** большой TLS ClientHello (Reality+uTLS ~1500B)
+   не влезает в MTU 1492. Симптом: мелкие пакеты ходят, TLS виснет; с DHCP-WAN
+   (MTU 1500) проблемы нет. Фикс:
+```routeros
+/ip firewall mangle add chain=forward protocol=tcp tcp-flags=syn action=change-mss new-mss=clamp-to-pmtu
+/ip firewall mangle add chain=output  protocol=tcp tcp-flags=syn action=change-mss new-mss=clamp-to-pmtu
+```
+
+Также на 7.25beta3: параметр контейнера называется `mountlist=` (не `mounts=`),
+а номер правила в print — это ID: порядок ЧТЕНИЯ вывода = порядок обработки.
+
 ## Известные грабли
 
 1. **TUN stack: mips** — контейнер крашится. Используйте `mixed`
