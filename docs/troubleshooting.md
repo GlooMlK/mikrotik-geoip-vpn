@@ -122,6 +122,33 @@ mihomo растёт (GeoIP-базы + соединения) до предела 
 Также на 7.25beta3: параметр контейнера называется `mountlist=` (не `mounts=`),
 а номер правила в print — это ID: порядок ЧТЕНИЯ вывода = порядок обработки.
 
+## Грабля: dst-address-list="!list1,list2" ломает фильтр
+
+`!` перед списком в сочетании с перечислением через запятую НЕ означает
+"в list2 И НЕ в list1". На практике (ROS 7.x) такое правило в mark-connection
+помечало ВСЕ соединения, включая публичные адреса — иностранный трафик уходил
+мимо VPN с локальным IP (Telegram/YouTube умирают, RU работает).
+
+**Правильно:** явный список целевых сетей (REMOTE_NETS) без отрицаний:
+```routeros
+/ip firewall address-list add list=REMOTE_NETS address=192.168.0.0/24
+/ip firewall address-list add list=REMOTE_NETS address=192.168.150.0/24
+# ...
+/ip firewall mangle add chain=prerouting action=mark-connection \
+    new-connection-mark=to-remote-lan passthrough=yes \
+    connection-state=new dst-address-list=REMOTE_NETS in-interface=bridge
+/ip firewall mangle add chain=prerouting action=accept \
+    connection-mark=to-remote-lan
+# оба — ПЕРЕД правилом ALL LAN via mihomo
+```
+
+**Обязательный тест для любых routing-правил (две стороны):**
+1. Целевой dst ПОЛУЧАЕТ метку: `nc -z 192.168.0.98 445` → connection-mark в conntrack
+2. Публичный dst НЕ получает: `nc -z 8.8.8.8 443` → connection-mark ПУСТОЙ
+
+Также: accept connection-mark помечается флагом `I` (invalid) пока ни одного
+помеченного соединения не существует — пропадает сам после первого матча.
+
 ## Известные грабли
 
 1. **TUN stack: mips** — контейнер крашится. Используйте `mixed`
